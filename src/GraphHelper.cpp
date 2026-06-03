@@ -1,9 +1,13 @@
 #include "GraphHelper.h"
 
+#include <map>
+
 #ifdef DEBUG
   using std::cerr;
   using std::endl;
 #endif
+
+using std::map;
 
 vector<size_t> range(size_t n)
 {
@@ -778,8 +782,94 @@ Graph* Graph::collapse_graph(MutableVertexPartition* partition)
 
   Graph* G = new Graph(graph, collapsed_weights, csizes, this->_correct_self_loops);
   G->_remove_graph = true;
+
+  // Aggregate per-layer node strengths: a collapsed node (community) inherits
+  // the sum of its constituents' per-layer out/in strengths. The per-layer total
+  // weights m_s are invariant under collapse and are carried over unchanged.
+  if (this->has_layer_strengths())
+  {
+    vector< vector<LayerStrength> > collapsed_layer_strength(n_collapsed);
+    for (size_t v_comm = 0; v_comm < n_collapsed; v_comm++)
+    {
+      map<size_t, pair<double, double> > acc; // layer -> (out, in)
+      for (size_t v : community_memberships[v_comm])
+        for (LayerStrength const& ls : this->_node_layer_strength[v])
+        {
+          pair<double, double>& a = acc[ls.layer];
+          a.first += ls.out_strength;
+          a.second += ls.in_strength;
+        }
+      collapsed_layer_strength[v_comm].reserve(acc.size());
+      for (map<size_t, pair<double, double> >::const_iterator it = acc.begin(); it != acc.end(); ++it)
+      {
+        LayerStrength ls;
+        ls.layer = it->first;
+        ls.out_strength = it->second.first;
+        ls.in_strength = it->second.second;
+        collapsed_layer_strength[v_comm].push_back(ls);
+      }
+    }
+    G->_node_layer_strength = collapsed_layer_strength;
+    G->_layer_total_weight = this->_layer_total_weight;
+  }
+
   #ifdef DEBUG
     cerr << "exit Graph::collapse_graph(vector<size_t> membership)" << endl << endl;
   #endif
   return G;
+}
+
+void Graph::set_layer_strengths(
+  vector< vector< pair<size_t, double> > > const& node_layer_strength,
+  vector<double> const& layer_total_weight)
+{
+  if (node_layer_strength.size() != this->vcount())
+    throw Exception("Node layer strength vector inconsistent length with the vertex count of the graph.");
+
+  this->_node_layer_strength.assign(this->vcount(), vector<LayerStrength>());
+  for (size_t v = 0; v < this->vcount(); v++)
+  {
+    this->_node_layer_strength[v].reserve(node_layer_strength[v].size());
+    for (pair<size_t, double> const& ls : node_layer_strength[v])
+    {
+      LayerStrength entry;
+      entry.layer = ls.first;
+      entry.out_strength = ls.second;
+      entry.in_strength = ls.second; // undirected: out == in
+      this->_node_layer_strength[v].push_back(entry);
+    }
+  }
+  this->_layer_total_weight = layer_total_weight;
+}
+
+void Graph::set_layer_strengths_directed(
+  vector< vector< pair<size_t, double> > > const& node_layer_out_strength,
+  vector< vector< pair<size_t, double> > > const& node_layer_in_strength,
+  vector<double> const& layer_total_weight)
+{
+  if (node_layer_out_strength.size() != this->vcount() ||
+      node_layer_in_strength.size() != this->vcount())
+    throw Exception("Node layer strength vector inconsistent length with the vertex count of the graph.");
+
+  this->_node_layer_strength.assign(this->vcount(), vector<LayerStrength>());
+  for (size_t v = 0; v < this->vcount(); v++)
+  {
+    // Merge the out and in sparse lists into (layer, out, in) triples.
+    map<size_t, pair<double, double> > acc; // layer -> (out, in)
+    for (pair<size_t, double> const& ls : node_layer_out_strength[v])
+      acc[ls.first].first += ls.second;
+    for (pair<size_t, double> const& ls : node_layer_in_strength[v])
+      acc[ls.first].second += ls.second;
+
+    this->_node_layer_strength[v].reserve(acc.size());
+    for (map<size_t, pair<double, double> >::const_iterator it = acc.begin(); it != acc.end(); ++it)
+    {
+      LayerStrength entry;
+      entry.layer = it->first;
+      entry.out_strength = it->second.first;
+      entry.in_strength = it->second.second;
+      this->_node_layer_strength[v].push_back(entry);
+    }
+  }
+  this->_layer_total_weight = layer_total_weight;
 }

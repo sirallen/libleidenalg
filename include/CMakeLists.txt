@@ -18,5 +18,6 @@ target_sources(libleidenalg
     CPMVertexPartition.h
     RBConfigurationVertexPartition.h
     RBERVertexPartition.h
+    MarketNullModularityVertexPartition.h
 
   )

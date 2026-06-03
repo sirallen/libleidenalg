@@ -229,6 +229,9 @@ void MutableVertexPartition::init_admin()
       this->_empty_communities.push_back(c);
   }
 
+  // Let derived classes (re)build any additional community-indexed admin.
+  this->init_admin_extra();
+
   #ifdef DEBUG
     cerr << "exit MutableVertexPartition::init_admin()" << endl << endl;
   #endif
@@ -278,6 +281,12 @@ void MutableVertexPartition::relabel_communities(vector<size_t> const& new_comm_
     this->_membership[i] = new_comm_id[this->_membership[i]];
 
   this->update_n_communities();
+
+  // Let derived classes permute their community-indexed admin to match. This
+  // runs while the base community bookkeeping (e.g. _cnodes) still reflects the
+  // pre-relabel communities, so derived classes can read cnodes(c) for old c.
+  this->relabel_communities_extra(new_comm_id);
+
   size_t nbcomms = this->n_communities();
 
   vector<double> new_total_weight_in_comm(nbcomms, 0.0);
@@ -730,6 +739,10 @@ void MutableVertexPartition::move_node(size_t v,size_t new_comm)
   #endif
   // Update the membership vector
   this->_membership[v] = new_comm;
+
+  // Let derived classes incrementally update any additional admin.
+  this->relocate_node(v, old_comm, new_comm);
+
   #ifdef DEBUG
     cerr << "exit MutableVertexPartition::move_node(" << v << ", " << new_comm << ")" << endl << endl;
   #endif

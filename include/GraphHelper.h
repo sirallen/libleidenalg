@@ -66,6 +66,16 @@ inline size_t get_random_int(size_t from, size_t to, igraph_rng_t* rng)
 
 void shuffle(vector<size_t>& v, igraph_rng_t* rng);
 
+// Per-layer (e.g. per-market) strength of a single node: its weighted out- and
+// in-degree restricted to one layer. For undirected graphs out_strength ==
+// in_strength. Stored sparsely (only layers in which the node participates).
+struct LayerStrength
+{
+  size_t layer;
+  double out_strength;
+  double in_strength;
+};
+
 class LIBLEIDENALG_EXPORT Graph
 {
   public:
@@ -146,6 +156,31 @@ class LIBLEIDENALG_EXPORT Graph
     inline double node_self_weight(size_t v)
     { return this->_node_self_weights[v]; };
 
+    // Per-layer (e.g. per-market) node strengths. Each node carries a sparse
+    // list of (layer, out-strength, in-strength) triples, i.e. its weighted
+    // out/in degree restricted to that layer (out == in for undirected graphs).
+    // `_layer_total_weight[s]` is layer s's total edge weight m_s (NOT doubled,
+    // matching the total_weight() convention), which is invariant under graph
+    // collapse. These support a configuration null model computed per layer
+    // rather than globally. See MarketNullModularityVertexPartition.
+    inline bool has_layer_strengths() { return !this->_layer_total_weight.empty(); };
+    inline size_t n_layers() { return this->_layer_total_weight.size(); };
+    inline double layer_total_weight(size_t s) { return this->_layer_total_weight[s]; };
+    inline vector<LayerStrength> const& node_layer_strength(size_t v)
+    { return this->_node_layer_strength[v]; };
+
+    // Undirected: a single per-(node, layer) strength (used as both out and in).
+    void set_layer_strengths(
+      vector< vector< pair<size_t, double> > > const& node_layer_strength,
+      vector<double> const& layer_total_weight);
+
+    // Directed: separate out- and in-strengths per (node, layer). The two sparse
+    // lists are merged per node into (layer, out, in) triples.
+    void set_layer_strengths_directed(
+      vector< vector< pair<size_t, double> > > const& node_layer_out_strength,
+      vector< vector< pair<size_t, double> > > const& node_layer_in_strength,
+      vector<double> const& layer_total_weight);
+
     inline size_t degree(size_t v, igraph_neimode_t mode)
     {
       if (mode == IGRAPH_IN || !this->is_directed())
@@ -197,6 +232,11 @@ class LIBLEIDENALG_EXPORT Graph
     vector<double> _edge_weights; // Used for the weight of the edges.
     vector<double> _node_sizes; // Used for the size of the nodes.
     vector<double> _node_self_weights; // Used for the self weight of the nodes.
+
+    // Optional per-layer node strengths (sparse) and per-layer total weights.
+    // Empty unless set via set_layer_strengths{,_directed}().
+    vector< vector<LayerStrength> > _node_layer_strength;
+    vector<double> _layer_total_weight;
 
     void cache_neighbours(size_t v, igraph_neimode_t mode);
     vector<size_t> _cached_neighs_from; size_t _current_node_cache_neigh_from;

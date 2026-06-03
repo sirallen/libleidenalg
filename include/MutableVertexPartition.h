@@ -138,6 +138,17 @@ class LIBLEIDENALG_EXPORT MutableVertexPartition
 
     void init_admin();
 
+    // Hooks for derived classes that maintain additional community-indexed
+    // administration (e.g. per-layer strength sums) alongside the standard
+    // bookkeeping. They are no-ops in the base class, so stock partitions are
+    // unaffected. init_admin_extra() is invoked at the end of init_admin() (a
+    // full rebuild); relocate_node() is invoked at the end of move_node() (an
+    // incremental update); relabel_communities_extra() is invoked while
+    // relabel_communities() permutes the community-indexed bookkeeping.
+    virtual void init_admin_extra() { }
+    virtual void relocate_node(size_t v, size_t old_comm, size_t new_comm) { }
+    virtual void relabel_communities_extra(vector<size_t> const& new_comm_id) { }
+
     vector<size_t> _membership; // Membership vector, i.e. \sigma_i = c means that node i is in community c
 
     Graph* graph;

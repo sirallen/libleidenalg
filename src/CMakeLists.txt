@@ -12,6 +12,7 @@ add_library(libleidenalg
   CPMVertexPartition.cpp
   RBConfigurationVertexPartition.cpp
   RBERVertexPartition.cpp
+  MarketNullModularityVertexPartition.cpp
 
 )
 
