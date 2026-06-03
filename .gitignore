@@ -1,2 +1,8 @@
 build/
 builds/
+
+# marketnull Python extension build artifacts
+wheelhouse/
+wheelhouse_local/
+marketnull/*.so
+*.egg-info/

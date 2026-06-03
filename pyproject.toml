@@ -1,0 +1,25 @@
+# Python packaging for the `marketnull` extension (a thin binding to
+# libleidenalg's MarketNullModularityVertexPartition). This lives at the repo
+# root so the build copies the whole repo (the extension statically compiles the
+# C++ sources under ../src; see marketnull/CMakeLists.txt). The C++ library's own
+# CMake build (root CMakeLists.txt) is unaffected.
+#
+# Build a deployable manylinux wheel via marketnull/build_wheel.sh (cibuildwheel).
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "marketnull"
+version = "0.1.0"
+description = "Market-aggregated configuration-null modularity (libleidenalg binding)."
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.21"]
+
+[tool.scikit-build]
+# Build the extension from marketnull/CMakeLists.txt rather than the C++ library
+# build at the repo root.
+cmake.source-dir = "marketnull"
+cmake.version = ">=3.23"
+build-dir = "build/{wheel_tag}"
+wheel.install-dir = "."

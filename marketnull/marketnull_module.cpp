@@ -13,7 +13,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 
-#include <igraph.h>
+#include <igraph/igraph.h>
 #include <GraphHelper.h>
 #include <Optimiser.h>
 #include <MarketNullModularityVertexPartition.h>
