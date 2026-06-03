@@ -27,8 +27,14 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include <map>
+#include <utility>
+#include <algorithm>
 
 using std::vector;
+using std::map;
+using std::pair;
+using std::make_pair;
 
 static int g_failures = 0;
 
@@ -59,6 +65,160 @@ static igraph_t* make_graph_dir(size_t n, vector<size_t> const& edges_flat, bool
 static igraph_t* make_graph(size_t n, vector<size_t> const& edges_flat)
 {
   return make_graph_dir(n, edges_flat, false);
+}
+
+// Large multi-level randomized stress test. See the invocation site for the
+// rationale behind each assertion.
+static void run_random_multilayer_test(bool directed, size_t n, size_t L,
+    size_t edges_per_layer, int n_trials, unsigned int seed, const char* label)
+{
+  const double resolution = 1.0;
+  unsigned int rng = seed;
+  auto next = [&rng]() -> unsigned int { rng = rng * 1103515245u + 12345u; return rng; };
+
+  // 1. Generate L random weighted layers (dedup edges within a layer, no loops).
+  vector< map<pair<size_t,size_t>, double> > layer_edges(L);
+  for (size_t s = 0; s < L; s++)
+  {
+    size_t added = 0, attempts = 0;
+    while (added < edges_per_layer && attempts < edges_per_layer * 20)
+    {
+      attempts++;
+      size_t u = next() % n, v = next() % n;
+      if (u == v) continue;
+      pair<size_t,size_t> key = directed ? make_pair(u, v)
+                                         : make_pair(std::min(u,v), std::max(u,v));
+      if (layer_edges[s].count(key)) continue;
+      layer_edges[s][key] = 1.0 + (next() % 3); // weight in {1,2,3}
+      added++;
+    }
+  }
+
+  // 2. Build per-layer Graphs, the aggregate edge map, per-node/per-layer
+  //    out/in strengths, and per-layer totals m_s.
+  vector<igraph_t*> raw_layer(L, nullptr);
+  vector<Graph*> G_layer(L, nullptr);
+  vector<double> layer_total_weight(L, 0.0);
+  map<pair<size_t,size_t>, double> agg;
+  vector< map<size_t,double> > node_out(n), node_in(n); // node -> (layer -> strength)
+
+  for (size_t s = 0; s < L; s++)
+  {
+    vector<size_t> flat;
+    vector<double> w;
+    for (map<pair<size_t,size_t>, double>::const_iterator it = layer_edges[s].begin();
+         it != layer_edges[s].end(); ++it)
+    {
+      size_t u = it->first.first, v = it->first.second;
+      double weight = it->second;
+      flat.push_back(u); flat.push_back(v);
+      w.push_back(weight);
+      layer_total_weight[s] += weight;
+      agg[it->first] += weight;
+      if (directed)
+      {
+        node_out[u][s] += weight;
+        node_in[v][s] += weight;
+      }
+      else
+      {
+        node_out[u][s] += weight; node_in[u][s] += weight;
+        node_out[v][s] += weight; node_in[v][s] += weight;
+      }
+    }
+    raw_layer[s] = make_graph_dir(n, flat, directed);
+    G_layer[s] = Graph::GraphFromEdgeWeights(raw_layer[s], w);
+  }
+
+  vector<size_t> agg_flat;
+  vector<double> agg_w;
+  for (map<pair<size_t,size_t>, double>::const_iterator it = agg.begin(); it != agg.end(); ++it)
+  {
+    agg_flat.push_back(it->first.first);
+    agg_flat.push_back(it->first.second);
+    agg_w.push_back(it->second);
+  }
+  igraph_t* raw_agg = make_graph_dir(n, agg_flat, directed);
+  Graph* G_agg = Graph::GraphFromEdgeWeights(raw_agg, agg_w);
+
+  vector< vector< pair<size_t,double> > > out_list(n), in_list(n);
+  for (size_t i = 0; i < n; i++)
+  {
+    for (map<size_t,double>::const_iterator it = node_out[i].begin(); it != node_out[i].end(); ++it)
+      out_list[i].push_back(*it);
+    for (map<size_t,double>::const_iterator it = node_in[i].begin(); it != node_in[i].end(); ++it)
+      in_list[i].push_back(*it);
+  }
+  if (directed)
+    G_agg->set_layer_strengths_directed(out_list, in_list, layer_total_weight);
+  else
+    G_agg->set_layer_strengths(out_list, layer_total_weight);
+
+  // Invariant 1: random-membership quality equivalence.
+  const double tol = 1e-6;
+  bool all_ok = true;
+  double max_diff = 0.0;
+  for (int t = 0; t < n_trials; t++)
+  {
+    vector<size_t> mem(n);
+    size_t n_comms = 1 + (next() % n);
+    for (size_t i = 0; i < n; i++)
+      mem[i] = next() % n_comms;
+
+    MarketNullModularityVertexPartition mn(G_agg, mem, resolution);
+    double a = mn.quality(resolution);
+    double b = 0.0;
+    for (size_t s = 0; s < L; s++)
+    {
+      RBConfigurationVertexPartition rb(G_layer[s], mem, resolution);
+      b += rb.quality(resolution);
+    }
+    double d = std::fabs(a - b);
+    max_diff = std::fmax(max_diff, d);
+    if (d > tol)
+      all_ok = false;
+  }
+  std::printf("[%s] %s: %d random memberships (n=%zu, L=%zu), market-null == multiplex sum (max |diff|=%.3e)\n",
+              all_ok ? "PASS" : "FAIL", label, n_trials, n, L, max_diff);
+  if (!all_ok)
+    g_failures++;
+
+  // Invariants 2 & 3: full optimisation exercises the multi-level collapse path.
+  {
+    MarketNullModularityVertexPartition mn(G_agg, resolution);
+    Optimiser o;
+    o.set_rng_seed(7);
+    o.optimise_partition(&mn);
+    double q_opt = mn.quality(resolution);
+    vector<size_t> mem = mn.membership();
+
+    MarketNullModularityVertexPartition mn_rebuilt(G_agg, mem, resolution);
+    {
+      char name[128];
+      std::snprintf(name, sizeof(name), "%s: optimised incremental quality matches from-scratch rebuild", label);
+      check_close(name, q_opt, mn_rebuilt.quality(resolution), tol);
+    }
+
+    double q_multi = 0.0;
+    for (size_t s = 0; s < L; s++)
+    {
+      RBConfigurationVertexPartition rb(G_layer[s], mem, resolution);
+      q_multi += rb.quality(resolution);
+    }
+    {
+      char name[128];
+      std::snprintf(name, sizeof(name), "%s: optimised membership scored under multiplex sum equals market-null", label);
+      check_close(name, q_opt, q_multi, tol);
+    }
+  }
+
+  delete G_agg;
+  igraph_destroy(raw_agg); delete raw_agg;
+  for (size_t s = 0; s < L; s++)
+  {
+    delete G_layer[s];
+    igraph_destroy(raw_layer[s]); delete raw_layer[s];
+  }
 }
 
 int main()
@@ -306,6 +466,34 @@ int main()
     igraph_destroy(dg0); delete dg0;
     igraph_destroy(dg1); delete dg1;
   }
+
+  // ======================================================================
+  // Large multi-level randomized stress test (Tests I/J).
+  //
+  // Builds many random weighted layers on a larger node set, forms the
+  // aggregate graph (summed weights) plus per-layer node strengths, and checks
+  // the invariants that must hold regardless of the optimiser's stochastic path:
+  //
+  //   1. For many random memberships, the single-graph market-null quality
+  //      equals the stock per-layer RBConfiguration quality summed over layers.
+  //   2. After a *full* Leiden optimisation of the single market-null graph,
+  //      the incrementally-tracked quality equals a from-scratch rebuild with
+  //      the same membership (admin integrity through move/collapse/refine/
+  //      relabel at multiple aggregation levels).
+  //   3. The membership found by the market-null optimiser, scored under the
+  //      stock multiplex sum, equals the market-null optimised quality. This
+  //      confirms the optimiser maximised the intended multiplex objective
+  //      through every collapse level. (We do NOT compare against the multiplex
+  //      optimiser's own optimum: distinct Leiden runs may reach different
+  //      local optima on a large graph.)
+  //
+  // Runs for both undirected and directed layers.
+  run_random_multilayer_test(/*directed=*/false, /*n=*/80, /*L=*/8,
+                             /*edges_per_layer=*/200, /*n_trials=*/200,
+                             /*seed=*/2024u, "I (undirected)");
+  run_random_multilayer_test(/*directed=*/true, /*n=*/80, /*L=*/8,
+                             /*edges_per_layer=*/200, /*n_trials=*/200,
+                             /*seed=*/4048u, "J (directed)");
 
   if (g_failures == 0)
     std::printf("\nAll checks passed.\n");
