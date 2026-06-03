@@ -24,9 +24,15 @@ export CIBW_MANYLINUX_X86_64_IMAGE="${CIBW_MANYLINUX_X86_64_IMAGE:-manylinux2014
 
 # Build & install a static, PIC igraph once per container, with optional features
 # that pull external deps disabled (we only need the core graph algorithms).
+#
+# Use the release TARBALL, not a git clone: the tarball ships pre-generated
+# flex/bison parser sources and vendored dependencies, so the build needs neither
+# flex/bison nor network access to submodules inside the manylinux container.
 export CIBW_BEFORE_ALL="
 set -e
-git clone --depth 1 --branch ${IGRAPH_VERSION} https://github.com/igraph/igraph.git /tmp/igraph
+curl -fsSL -o /tmp/igraph.tar.gz https://github.com/igraph/igraph/releases/download/${IGRAPH_VERSION}/igraph-${IGRAPH_VERSION}.tar.gz
+mkdir -p /tmp/igraph
+tar xzf /tmp/igraph.tar.gz -C /tmp/igraph --strip-components=1
 cmake -S /tmp/igraph -B /tmp/igraph/build \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_SHARED_LIBS=OFF \
