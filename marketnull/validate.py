@@ -100,6 +100,33 @@ q_rescored_d = marketnull.market_null_quality(
 check_close("directed optimise quality == re-scored membership", q_opt_d, q_rescored_d)
 check("directed optimised quality >= fixed-membership quality", q_opt_d >= q_fixed_d - 1e-9)
 
+# ---- Fixed-node (hub freezing) behaviour on the undirected toy ----
+# Freezing ALL nodes must leave them in their initial singletons (verifies the
+# optimiser never moves a fixed node), and the quality must equal the singleton
+# quality.
+identity = np.arange(N, dtype=np.int64)
+q_singletons = marketnull.market_null_quality(
+    N, u_src, u_dst, u_w, u_node, u_layer, u_out, u_in, u_totals,
+    identity, resolution=RES, directed=False,
+)
+mem_frozen, q_frozen = marketnull.optimise_market_null(
+    N, u_src, u_dst, u_w, u_node, u_layer, u_out, u_in, u_totals,
+    resolution=RES, seed=42, directed=False,
+    fixed_nodes=identity, reassign_fixed_at_end=False,
+)
+check("freeze-all keeps every node in its singleton", list(mem_frozen) == list(range(N)))
+check_close("freeze-all quality == singleton quality", q_frozen, q_singletons)
+
+# Freezing all then reassigning (single final sweep, all unfrozen) must recover
+# the optimum on this small graph.
+mem_re, q_re = marketnull.optimise_market_null(
+    N, u_src, u_dst, u_w, u_node, u_layer, u_out, u_in, u_totals,
+    resolution=RES, seed=42, directed=False,
+    fixed_nodes=identity, reassign_fixed_at_end=True,
+)
+check("freeze-all+reassign improves over singletons", q_re > q_singletons + 1e-9)
+check_close("freeze-all+reassign recovers optimum 6.0", q_re, 6.0)
+
 print(f"\nmembership (undirected) = {list(mem_u)}")
 print(f"membership (directed)   = {list(mem_d)}")
 print("\nAll checks passed." if failures == 0 else f"\n{failures} check(s) FAILED.")

@@ -114,19 +114,49 @@ py::tuple optimise_market_null(
     IntArray strength_node, IntArray strength_layer,
     DblArray strength_out, DblArray strength_in,
     DblArray layer_total_weight,
-    double resolution, size_t seed, bool directed)
+    double resolution, size_t seed, bool directed,
+    IntArray fixed_nodes, bool reassign_fixed_at_end)
 {
   igraph_t g;
   Graph* G = build_market_graph(&g, n_vertices, edge_src, edge_dst, edge_weight,
                                 strength_node, strength_layer, strength_out,
                                 strength_in, layer_total_weight, directed);
 
+  // Nodes in `fixed_nodes` (e.g. high-participation "hub"/market-maker wallets)
+  // are frozen in their initial singleton community: the optimiser never
+  // evaluates a move FOR them, eliminating their dominant per-move cost (which
+  // scales with the number of markets they trade). Other nodes may still join a
+  // hub's community if that improves quality. With reassign_fixed_at_end, a
+  // single final local-move sweep reassigns ONLY the hubs (everything else held
+  // fixed), so the hubs' expensive moves are paid once rather than every sweep.
+  auto fn = fixed_nodes.unchecked<1>();
+  bool any_fixed = false;
+  vector<bool> is_fixed(n_vertices, false);
+  for (py::ssize_t i = 0; i < fn.shape(0); i++)
+  {
+    size_t node = (size_t) fn(i);
+    if (node >= n_vertices)
+      throw std::invalid_argument("fixed_nodes contains an id >= n_vertices.");
+    is_fixed[node] = true;
+    any_fixed = true;
+  }
+
   MarketNullModularityVertexPartition partition(G, resolution);
   Optimiser o;
   o.set_rng_seed(seed);
   {
     py::gil_scoped_release release; // pure C++ work below; no Python objects touched
-    o.optimise_partition(&partition);
+    o.optimise_partition(&partition, is_fixed);
+
+    if (reassign_fixed_at_end && any_fixed)
+    {
+      // Hold everything except the hubs fixed and run one local-move sweep, so
+      // each hub snaps into the best community given the final structure.
+      vector<bool> fix_others(n_vertices, true);
+      for (py::ssize_t i = 0; i < fn.shape(0); i++)
+        fix_others[(size_t) fn(i)] = false;
+      o.move_nodes(&partition, fix_others, o.consider_comms, false);
+    }
   }
   double quality = partition.quality(resolution);
   vector<size_t> membership = partition.membership();
@@ -183,11 +213,16 @@ PYBIND11_MODULE(marketnull, m)
         py::arg("strength_out"), py::arg("strength_in"),
         py::arg("layer_total_weight"),
         py::arg("resolution") = 1.0, py::arg("seed") = 0, py::arg("directed") = false,
+        py::arg("fixed_nodes") = IntArray(0), py::arg("reassign_fixed_at_end") = false,
         "Optimise a single shared community assignment under the per-layer "
         "configuration-null modularity. Returns (membership, quality).\n\n"
         "strength_* are parallel sparse arrays of per-(node, layer) strengths; "
         "strength_in is ignored when directed=False. layer_total_weight is "
-        "indexed by dense layer id (0..L-1).");
+        "indexed by dense layer id (0..L-1).\n\n"
+        "fixed_nodes: node ids frozen in their initial singleton community during "
+        "optimisation (e.g. high-participation hub/market-maker wallets), which "
+        "removes their dominant per-move cost. reassign_fixed_at_end: if True, run "
+        "one final local-move sweep that reassigns only those frozen nodes.");
 
   m.def("market_null_quality", &market_null_quality,
         py::arg("n_vertices"),
