@@ -2,7 +2,7 @@
 #define MARKETNULLMODULARITYVERTEXPARTITION_H
 
 #include "LinearResolutionParameterVertexPartition.h"
-#include <map>
+#include <unordered_map>
 
 /****************************************************************************
 Modularity with a per-layer ("market-aggregated") configuration null.
@@ -62,16 +62,16 @@ class LIBLEIDENALG_EXPORT MarketNullModularityVertexPartition : public LinearRes
   private:
     // Per-community, per-layer out/in strength sums K_c^out,(s), K_c^in,(s)
     // (sparse over layers). For undirected graphs the two maps are identical.
-    vector< map<size_t, double> > _out_strength_in_comm;
-    vector< map<size_t, double> > _in_strength_in_comm;
+    vector< std::unordered_map<size_t, double> > _out_strength_in_comm;
+    vector< std::unordered_map<size_t, double> > _in_strength_in_comm;
 
     void build_layer_strength_admin();
 
-    static inline double lookup(vector< map<size_t, double> > const& K, size_t comm, size_t layer)
+    static inline double lookup(vector< std::unordered_map<size_t, double> > const& K, size_t comm, size_t layer)
     {
       if (comm >= K.size())
         return 0.0;
-      map<size_t, double>::const_iterator it = K[comm].find(layer);
+      std::unordered_map<size_t, double>::const_iterator it = K[comm].find(layer);
       if (it == K[comm].end())
         return 0.0;
       return it->second;

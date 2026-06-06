@@ -6,3 +6,4 @@ wheelhouse/
 wheelhouse_local/
 marketnull/*.so
 *.egg-info/
+.DS_Store

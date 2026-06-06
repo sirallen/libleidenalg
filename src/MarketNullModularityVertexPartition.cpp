@@ -6,13 +6,13 @@
 namespace {
 // Move strength k from old_comm to new_comm within layer s of a
 // per-community/per-layer sum map, dropping residual entries.
-inline void relocate_layer(vector< map<size_t, double> >& K,
+inline void relocate_layer(vector< std::unordered_map<size_t, double> >& K,
     size_t old_comm, size_t new_comm, size_t s, double k)
 {
   if (k != 0.0)
   {
-    map<size_t, double>& old_map = K[old_comm];
-    map<size_t, double>::iterator it = old_map.find(s);
+    std::unordered_map<size_t, double>& old_map = K[old_comm];
+    std::unordered_map<size_t, double>::iterator it = old_map.find(s);
     if (it != old_map.end())
     {
       it->second -= k;
@@ -128,8 +128,8 @@ void MarketNullModularityVertexPartition::relocate_node(size_t v, size_t old_com
 void MarketNullModularityVertexPartition::relabel_communities_extra(vector<size_t> const& new_comm_id)
 {
   size_t nbcomms = this->n_communities();
-  vector< map<size_t, double> > new_out(nbcomms);
-  vector< map<size_t, double> > new_in(nbcomms);
+  vector< std::unordered_map<size_t, double> > new_out(nbcomms);
+  vector< std::unordered_map<size_t, double> > new_in(nbcomms);
 
   for (size_t c = 0; c < new_comm_id.size(); c++)
   {
